@@ -138,6 +138,7 @@ def get_subset_data(ds, idx=None):
 def file_exists(filename):
     return os.path.isfile(filename) 
 
+# for reproducibility
 def set_random_seeds(seed=0):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -153,31 +154,14 @@ def parse_model_path(model_path):
         sections = model_path.split('_')
         params = {}
         params['dset_name'] = sections[0]
-        params['laug'] = sections[2]
+        params['laug_type'] = sections[2]
         params['laug_param'] = eval(sections[3])
-        params['daug'] = sections[5]
+        params['daug_type'] = sections[5]
         params['daug_param'] = eval(sections[6])
         params['dp_norm_clip'] = eval(sections[9])
         params['dp_noise'] = eval(sections[11])
-        params['capacity'] = 1.0
-        params['training_length'] = 'regular'
-
-        if params['laug'] != 'no':
-            params['aug'] = params['laug']
-            params['aug_param'] = params['laug_param']
-        elif params['daug'] != 'no':
-            params['aug'] = params['daug']
-            params['aug_param'] = params['daug_param']
-        elif params['dp_noise'] != 0:
-            params['aug'] = 'dp'
-            params['aug_param'] = params['dp_noise']
-        else:
-            params['aug'] = 'no'
-
-        if len(sections) == 14:
-            params['capacity'] = eval(sections[13]) if sections[12] == 'cap' else 1.0
-            params['training_length'] = sections[13] if sections[12] == 'length' else 'regular'
-
+        params['num_epochs'] = int(sections[13])
+        params['path_suffix'] = sections[15]
         return params
     except:
         return None
@@ -192,57 +176,44 @@ def get_reduction_params():
     return names, funcs 
 
 
-def get_ds_and_clf(ds_name, is_dp=False, cap=1, train_length='regular', return_dataset=True, device='cpu'):
+def get_ds_and_clf(ds_name, is_dp=False, num_epochs=35, return_dataset=True, device='cpu'):
     
     
-    if train_length == 'xxxxxshort':
-        epochs = 2
-        milestones = [1]
-
-    if train_length == 'xxxxshort':
-        epochs = 3
+    if num_epochs == 3:
         milestones = [1,2]
 
-    if train_length == 'xxxshort':
-        epochs = 4
+    elif num_epochs == 4:
         milestones = [2,3]
 
-    if train_length == 'xxshort':
-        epochs = 7
+    elif num_epochs == 7:
         milestones = [3, 6]
-    
-    if train_length == 'xshort':
-        epochs = 14
-        milestones = [6, 12]
-    
-    elif train_length == 'short':
-        epochs = 21
-        milestones = [9, 18]
 
-    elif train_length == 'regular':
-        epochs = 35
+    elif num_epochs == 35:
         milestones = [20, 30]
+    
+    else:
+        milestones = [int(num_epochs/2), int(2*num_epochs/3)]
 
 
     if ds_name == 'fmnist':
-        clf = m.FMNISTClassifier(num_classes=10, dp=is_dp, cap=cap, device=device)
+        clf = m.FMNISTClassifier(num_classes=10, dp=is_dp, device=device)
         if return_dataset:
             datasets = get_fmnist_datasets(device=device)
 
     elif ds_name == 'cifar10':
-        clf = m.CIFARClassifier(num_classes=10, dp=is_dp, cap=cap, device=device)
+        clf = m.CIFARClassifier(num_classes=10, dp=is_dp, device=device)
         if return_dataset:
             datasets = get_cifar10_datasets(device=device)
 
     elif ds_name == 'cifar100':
-        clf = m.CIFARClassifier(num_classes=100, dp=is_dp, cap=cap, device=device)
+        clf = m.CIFARClassifier(num_classes=100, dp=is_dp, device=device)
         if return_dataset:
             datasets = get_cifar100_datasets(device=device)
     
     if return_dataset:
-        return clf, datasets, epochs, milestones
+        return clf, datasets, milestones
     else:
-        return clf, epochs, milestones
+        return clf, milestones
 
 
 def get_ds(ds_name, device='cpu'):
@@ -431,40 +402,38 @@ def loader_batch_counter(loader):
     for _ in loader:
         num_batches += 1
     return num_batches      
+    
+def collect_all_models(models_path):
+    model_params = []
 
-
-def collect_all_models_and_results(models_path, num_attacker_train=250, get_without_results=False, seed=0):
-    all_params = []
-    for fn in [os.path.join(models_path, fn) for fn in os.listdir(models_path)]:
-        params = parse_model_path(os.path.basename(fn))
+    for dir in [os.path.join(models_path, d) for d in os.listdir(models_path)]:
+        params = parse_model_path(os.path.basename(dir))
 
         if params is None:
             continue
 
-        params['model_path'] = fn
+        mpath = os.path.join(dir, 'clf')
 
-        results_path = os.path.join(fn, f'mi_results_ntrain_{num_attacker_train}_randseed_{seed}.pickle')
-
-        if not file_exists(results_path):
-            if get_without_results:
-                all_params.append(params)
+        if not file_exists(mpath + '.dat'):
             continue
+        
+        params['model_path'] = mpath
+        params['dir'] = dir
+        model_params.append(params)
 
-        with open(results_path, 'rb') as handle:
-            results = pickle.load(handle)
+        if params['dp_norm_clip'] != 0 and params['dp_noise'] != 0:
+            params['dp'] = True
+            params['epsilon'] = load_model(mpath).dp_epsilons[-1]
 
-        # read the epsilon and save it to the dict
-        if params['dp_noise'] != 0:
-            clf = load_model(os.path.join(params['model_path'], 'clf'))
-            params['epsilon'] = clf.dp_epsilons[-1]
         else:
-            params['epsilon'] = 0
+            params['dp'] = False
+            params['epsilon'] = np.inf
 
 
-        params.update(results)
-        all_params.append(params)
+    return model_params
 
-    return all_params
+
+
 
 def sample_batches(loader, frac_batches):
     num_batches = loader_batch_counter(loader)

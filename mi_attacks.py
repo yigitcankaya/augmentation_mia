@@ -67,10 +67,11 @@ def take_subset_from_datasets(datasets, seed, n_attacker_train, n_attacker_test,
     
     return (train_loader, test_loader), idx
 
-def apply_mi_attack(model, loaders, idx, save_path, num_attacker_train=100, seed=0, device='cpu'):
+
+def apply_mi_attack(model, loaders, idx, save_path, n_attacker_train=100, seed=0, device='cpu'):
 
     results = {}
-    results_path = os.path.join(save_path, f'mi_results_ntrain_{num_attacker_train}_randseed_{seed}.pickle')
+    results_path = os.path.join(save_path, f'mi_results_ntrain_{n_attacker_train}_randseed_{seed}.pickle')
 
     if af.file_exists(results_path):
         with open(results_path, 'rb') as handle:
@@ -102,10 +103,83 @@ def apply_mi_attack(model, loaders, idx, save_path, num_attacker_train=100, seed
     print('Train Top1: {0:.3f}%, Train Top5: {1:.3f}%, Test Top1: {2:.3f}%, Test Top5: {3:.3f}%'.format(results['train_top1'], results['train_top5'], results['test_top1'], results['test_top5']))
     print('Avg Yeom MI Advantage: {0:.2f}'.format(results['avg_yeom_adv']))
     print('Best Yeom MI Advantage: {0:.2f}'.format(results['best_yeom_adv']))
-    print('--------------------------------------------')
-
 
     return results
+
+
+# apply the augmentation aware attacks, n_repeat is for random augmentation methods
+def apply_aware_attack(model, params, loaders, idx, save_path, n_attacker_train=100, n_repeat=25, seed=0, teacher=None, device='cpu'):
+
+    results = {}
+    results_path = os.path.join(save_path, f'aware_mi_results_ntrain_{n_attacker_train}_numrepeat_{n_repeat}_randseed_{seed}.pickle')
+
+    if af.file_exists(results_path):
+        with open(results_path, 'rb') as handle:
+            results = pickle.load(handle)
+
+    else:
+        laug_type, laug_param = params['laug_type'], params['laug_param']
+        daug_type, daug_param = params['daug_type'], params['daug_param']
+
+        train_in_atk_train_idx, _, test_in_atk_train_idx, _ = idx
+
+        if daug_type == 'mixup':
+            mixing_data = loaders[0].dataset.data[train_in_atk_train_idx].to(device) # use attackers training data in the victim's training set for mixup
+            mixing_labels = loaders[0].dataset.labels[train_in_atk_train_idx].to(device)
+            aug_type, aug_param = daug_type, (daug_param, mixing_data, mixing_labels)
+
+        elif laug_type == 'distillation':
+            aug_type, aug_param = laug_type, (laug_param, teacher)
+
+        elif laug_type != 'no':
+            aug_type, aug_param = laug_type, laug_param
+        
+        elif daug_type != 'no':
+            aug_type, aug_param = daug_type, daug_param
+        
+
+        train_losses = m.get_clf_losses_w_aug(model, loaders[0], aug_type, aug_param, num_repeat=n_repeat, device=device)
+        test_losses = m.get_clf_losses_w_aug(model, loaders[1], aug_type, aug_param, num_repeat=n_repeat, device=device)
+
+        if n_repeat == 1:
+            _, aware_results = apply_avg_and_best_attacks(train_losses, test_losses, idx)
+            threshold, train_memberships, test_memberships, adv = aware_results
+            reduction = 'none'
+            train_losses_all = train_losses
+            test_losses_all = test_losses
+
+        else:
+            best_local_adv = -100
+
+            for name, func in zip(*af.get_reduction_params()):
+                cur_train_losses, cur_test_losses = func(train_losses, axis=1), func(test_losses, axis=1)
+
+                _, aware_results = apply_avg_and_best_attacks(cur_train_losses, cur_test_losses, idx)
+                cur_threshold, cur_train_memberships, cur_test_memberships, cur_adv = aware_results
+                adv_local = mi_success(yeom_mi_attack(cur_train_losses[train_in_atk_train_idx], cur_threshold), yeom_mi_attack(cur_test_losses[test_in_atk_train_idx], cur_threshold), False)
+                if best_local_adv < adv_local:
+                    best_local_adv = adv_local
+                    adv = cur_adv
+                    train_memberships = cur_train_memberships
+                    test_memberships = cur_test_memberships
+                    train_losses_all = cur_train_losses
+                    test_losses_all = cur_test_losses
+                    threshold = cur_threshold
+                    reduction = name
+
+
+        results['threshold'], results['adv'] = threshold, adv
+        results['train_memberships'], results['test_memberships'] = train_memberships, test_memberships
+        results['train_losses'], results['test_losses'] = train_losses_all, test_losses_all
+        results['num_repeat'] = n_repeat
+        results['reduction'] = reduction
+
+        with open(results_path, 'wb') as handle:
+            pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print('Aware MI Advantage: {0:.2f} - Reduction: {1}'.format(results['adv'], results['reduction']))
+
+
 
 
 def mi_success(train_memberships, test_memberships, print_details=True):
@@ -151,53 +225,81 @@ def yeom_w_get_best_threshold(train_losses, test_losses):
     return best_threshold
 
 
-def attack_wrapper(mi_loaders, idx, num_attacker_train, seed, model_params):
+def attack_wrapper(mi_loaders, idx, n_attacker_train, seed, params):
     # datasets for MIAs
 
-    save_path = model_params['model_path']
+    save_dir = params['dir']
 
-    print(f'Attacking {os.path.basename(save_path)} - |A|: {num_attacker_train} - S: {seed}...')
+    print(f'Attacking {os.path.basename(save_dir)} - |A|: {n_attacker_train} - S: {seed}...')
 
-    if not af.file_exists(os.path.join(save_path, 'clf.dat')):
-        print(f'Model does not exist...')
-        print('--------------------------------------------')
-        return
 
-    results_path = os.path.join(save_path, f'mi_results_ntrain_{num_attacker_train}_randseed_{seed}.pickle')
+    results_path = os.path.join(save_dir, f'mi_results_ntrain_{n_attacker_train}_randseed_{seed}.pickle')
 
     if af.file_exists(results_path):
-        apply_mi_attack(None, None, None, save_path, num_attacker_train, seed, None)
+        apply_mi_attack(None, None, None, save_dir, n_attacker_train, seed, None)
     else:  
-        clf = af.load_model(os.path.join(save_path, 'clf'), device)
-        apply_mi_attack(clf, mi_loaders, idx, save_path, num_attacker_train=num_attacker_train, seed=seed, device=device)
+        clf = af.load_model(params['model_path'], device)
+        apply_mi_attack(clf, mi_loaders, idx, save_dir, n_attacker_train=n_attacker_train, seed=seed, device=device)
+
+
+    if params['laug_type'] != 'no' or params['daug_type'] != 'no':
+        num_repeat = 1 if params['laug_type'] in ['distillation', 'smooth'] else n_repeat
+        results_path = os.path.join(save_dir, f'aware_mi_results_ntrain_{n_attacker_train}_numrepeat_{n_repeat}_randseed_{seed}.pickle')
+
+        if af.file_exists(results_path):
+            apply_aware_attack(None, None, None, None, save_dir, n_attacker_train, n_repeat, seed, None, None)
+        else:  
+            if params['laug_type'] == 'distillation':
+                teacher_dir = os.path.dirname(save_dir)
+                path_suffix = params['path_suffix']
+                teacher_path = f'{params["dset_name"]}_laug_no_0_daug_no_0_dp_nc_0_nm_0_epochs_{regular_train_epochs}_run_{path_suffix}'
+                teacher = af.load_model(os.path.join(teacher_dir, teacher_path, 'clf'), device)
+            else:
+                teacher = None
+
+            clf = af.load_model(os.path.join(save_dir, 'clf'), device)
+            apply_aware_attack(clf, params, mi_loaders, idx, save_dir, n_attacker_train=n_attacker_train, n_repeat=num_repeat, seed=seed, teacher=teacher, device=device)
+
+    print('--------------------------------------------')
 
 
     
 if __name__ == "__main__":
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
     af.set_random_seeds()
 
+    import json
+    import sys
+
+    config_path = sys.argv[1]
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+
+    n_attacker_train = cfg['attack']['n_attacker_train']
+    n_attacker_test = cfg['attack']['n_attacker_test']
+    seeds = cfg['attack']['random_seeds']
+    n_repeat = cfg['attack']['n_aware_repeat']
+    ds_names = cfg['training_datasets']
+    models_path = cfg['models_path']
+
     device = af.get_pytorch_device()    
 
-    # attacker's test sets contain 5000 samples
-    N_ATTACKER_TEST = 5000
+    regular_train_epochs = cfg['training_num_epochs']
 
-    ds_names = ['cifar10']
-    attrs = [100]
 
-    for rep in [None, 1, 2]:
-        for ds_name in ds_names:
-            models_path = f'{ds_name}_models' if rep is None else f'{ds_name}_models_rep_{rep}'
-            all_models = af.collect_all_models_and_results(models_path, None, True, None)
-            print(f'There are {len(all_models)} models in {models_path}.')
+    for ds_name in ds_names:
+        path = os.path.join(models_path, ds_name)
+        all_model_params = af.collect_all_models(path)
 
-            # load the datasets
-            datasets = af.get_ds(ds_name, device)
+        print(f'There are {len(all_model_params)} models in {path}.')
 
-            for seed in af.get_random_seeds():
-                for num_attacker_train in attrs:
-                    # N instances from train set and N from test set
-                    mi_loaders, idx = take_subset_from_datasets(datasets, seed, num_attacker_train, N_ATTACKER_TEST, device=device)
-                    for model_params in all_models:
-                        attack_wrapper(mi_loaders, idx, num_attacker_train, seed, model_params)
+        # load the datasets
+        datasets = af.get_ds(ds_name, device)
+
+        for seed in af.get_random_seeds():
+            # N instances from train set and N from test set
+            mi_loaders, idx = take_subset_from_datasets(datasets, seed, n_attacker_train, n_attacker_test, device=device)
+            for params in all_model_params:
+                attack_wrapper(mi_loaders, idx, n_attacker_train, seed, params)

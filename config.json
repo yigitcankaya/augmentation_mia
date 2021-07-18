@@ -1,0 +1,27 @@
+{
+    "path_suffices": [1,2,3],
+    "training_datasets": ["fmnist", "cifar10", "cifar100"],
+    "training_num_epochs": 35,
+    "early_stopping_epochs": [3,4,7],
+    "train_early_stopping_models": true,
+    "models_path": "./models",
+    "regular_batch_size": 128,
+    "training_augmentations": ["distillation", "smooth", "disturblabel", "crop", "noise", "cutout", "mixup"],
+    "augmentation_params": {
+        "distillation": [1, 2, 3, 5, 10, 15, 25, 50, 75, 100, 125, 150, 250, 500, 650, 700, 750, 850, 900, 1000],
+        "smooth": [0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.975, 0.99, 0.9915, 0.9925, 0.993, 0.9935, 0.994, 0.995],
+        "disturblabel": [0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.425, 0.45, 0.5, 0.525, 0.55, 0.575, 0.6, 0.7, 0.725, 0.75, 0.775, 0.8, 0.825, 0.85, 0.875, 0.9, 0.95, 0.975, 0.99],
+        "crop": [1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38],
+        "noise": [0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225, 0.25, 0.275, 0.3, 0.325, 0.35],
+        "cutout":  [4, 8, 12, 16, 20, 24, 28, 32, 33, 34, 35, 36, 40, 44, 46, 48, 50, 52],
+        "mixup": [0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, "inf"]
+    },
+    "train_with_dp": true,
+    "dp_params": {
+        "norm_clip": 1,
+        "noise_coeffs": [0.01, 0.025, 0.05, 0.075, 0.1, 0.175, 0.25, 0.375, 0.5, 0.75, 1, 1.75, 2.5, 3.75, 5, 7.5, 10],
+        "batch_size": 64,
+        "accumulation_steps": 4
+    },
+    "train_crop_smooth": true
+}

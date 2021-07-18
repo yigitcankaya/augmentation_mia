@@ -20,7 +20,7 @@ class Flatten(nn.Module):
 
 
 class FMNISTClassifier(nn.Module):
-    def __init__(self, num_classes=10, dp=False, cap=1, device='cpu'):
+    def __init__(self, num_classes=10, dp=False, device='cpu'):
         super(FMNISTClassifier, self).__init__()
         self.num_classes = num_classes
         self.image_size = 28
@@ -36,19 +36,19 @@ class FMNISTClassifier(nn.Module):
         
         
         self.model = nn.Sequential(
-            nn.Conv2d(1, int(128*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(128*cap)),
+            nn.Conv2d(1, 128, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(128),
             nn.ReLU(True),
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
 
-            nn.Conv2d(int(128*cap), int(256*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(256*cap)),
+            nn.Conv2d(128, 256, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(256),
             nn.ReLU(True),
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             
             Flatten(),
 
-            nn.Linear(in_features=int(256*cap)*49, out_features=1024, bias=True),
+            nn.Linear(in_features=256*49, out_features=1024, bias=True),
             nn.ReLU(True),
             nn.Linear(in_features=1024, out_features=self.num_classes, bias=True),
         ).to(device)
@@ -63,7 +63,7 @@ class FMNISTClassifier(nn.Module):
 
 
 class CIFARClassifier(nn.Module):
-    def __init__(self, num_classes=10, dp=False, cap=1, device='cpu'):
+    def __init__(self, num_classes=10, dp=False, device='cpu'):
         super(CIFARClassifier, self).__init__()
         self.num_classes = num_classes
         self.image_size = 32
@@ -79,46 +79,46 @@ class CIFARClassifier(nn.Module):
         
 
         self.model = nn.Sequential(
-            nn.Conv2d(3, int(64*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(64*cap)),
+            nn.Conv2d(3, 64, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(64),
             nn.ReLU(True),
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             
-            nn.Conv2d(int(64*cap), int(128*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(128*cap)),
+            nn.Conv2d(64, 128, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(128),
             nn.ReLU(True),
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             
-            nn.Conv2d(int(128*cap), int(256*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(256*cap)),
+            nn.Conv2d(128, 256, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(256),
             nn.ReLU(True),
 
-            nn.Conv2d(int(256*cap), int(256*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(256*cap)),
+            nn.Conv2d(256, 256, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(256),
             nn.ReLU(True),
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             
-            nn.Conv2d(int(256*cap), int(512*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(512*cap)),
+            nn.Conv2d(256, 512, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(512),
             nn.ReLU(True),
             
-            nn.Conv2d(int(512*cap), int(512*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(512*cap)),
+            nn.Conv2d(512, 512, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(512),
             nn.ReLU(True),
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
 
-            nn.Conv2d(int(512*cap), int(512*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(512*cap)),
+            nn.Conv2d(512, 512, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(512),
             nn.ReLU(True),
 
-            nn.Conv2d(int(512*cap), int(512*cap), kernel_size=(3,3), stride=(1,1), padding=(1,1)),
-            BN(int(512*cap)),
+            nn.Conv2d(512, 512, kernel_size=(3,3), stride=(1,1), padding=(1,1)),
+            BN(512),
             nn.ReLU(True),
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False),
             
             Flatten(),            
 
-            nn.Linear(in_features=int(512*cap), out_features=1024, bias=True),
+            nn.Linear(in_features=512, out_features=1024, bias=True),
             nn.ReLU(True),
             nn.Linear(in_features=1024, out_features=self.num_classes)
 
@@ -331,6 +331,111 @@ def get_clf_losses(clf, loader, device='cpu'):
 
     
     return losses
+
+
+def get_clf_losses_w_aug(clf, loader, aug_type, aug_param, num_repeat=25, device='cpu'):
+    with torch.no_grad():
+        return get_clf_losses_w_aug_(clf, loader, aug_type, aug_param, num_repeat=num_repeat, device=device)
+
+
+def get_clf_losses_w_aug_(clf, loader, aug_type, aug_param, num_repeat=25, device='cpu'):
+
+    if aug_type == 'distillation':
+        aug_param, teacher = aug_param
+        teacher.eval()
+        
+    if aug_type in ['distillation', 'smooth', 'mixup']:
+        clf_loss_func = lambda pred, target: SoftLabelNLL(pred, target, reduce=False)
+    else:
+        clf_loss_func = nn.NLLLoss(reduction='none')
+
+    if aug_type == 'mixup':
+        aug_param, mixing_data, mixing_labels = aug_param
+        mixing_labels = ((torch.zeros(len(mixing_labels), clf.num_classes, dtype=torch.float)).to(device)).scatter_(1, mixing_labels.view(-1, 1), 1)
+
+    losses = np.zeros((af.loader_inst_counter(loader), num_repeat))
+
+    clf.eval()
+    cur_idx = 0
+    for batch in loader:
+        b_x = batch[0].to(device, dtype=torch.float)
+        b_y = batch[1].to(device, dtype=torch.long)
+
+        output = clf(b_x)
+
+        for ii in range(num_repeat):
+            if aug_type == 'distillation':
+                b_y_aug = teacher.forward_w_temperature(b_x, aug_param) # assumes access to the teacher of the victim model
+                losses[cur_idx:cur_idx+len(b_x), ii] = clf_loss_func(output, b_y_aug).flatten().cpu().detach().numpy()
+
+            elif aug_type == 'smooth': # we use smooth labels as target for disturblabel too because that's essentially what it does
+                b_y_one_hot = (torch.zeros(b_x.shape[0], clf.num_classes, dtype=torch.float).to(device)).scatter_(1, b_y.view(-1, 1), 1)
+                b_y_aug = (1-aug_param)*b_y_one_hot + (aug_param/clf.num_classes)
+                losses[cur_idx:cur_idx+len(b_x), ii] = clf_loss_func(output, b_y_aug).flatten().cpu().detach().numpy()
+
+            elif aug_type == 'disturblabel':
+                C = clf.num_classes
+                p_c = (1 - ((C - 1)/C) * aug_param)
+                p_i = (1 / C) * aug_param
+
+                b_y_view = b_y.view(-1, 1)   # batch y
+                b_y_one_hot = (torch.ones(b_y_view.shape[0], C) * p_i).to(device)
+                b_y_one_hot.scatter_(1, b_y_view, p_c)
+                b_y_one_hot = b_y_one_hot.view( *(tuple(batch[1].shape) + (-1,) ) )
+
+                # sample from Multinoulli distribution
+                distribution = torch.distributions.OneHotCategorical(b_y_one_hot)
+                b_y_aug = distribution.sample()
+                b_y_aug = b_y_aug.max(dim=1)[1]  # back to categorical
+
+                losses[cur_idx:cur_idx+len(b_x), ii] = clf_loss_func(output, b_y_aug).flatten().cpu().detach().numpy()
+
+            elif aug_type == 'noise':
+                b_x_aug = torch.clamp(b_x + torch.randn(b_x.shape, device=device) * aug_param, min=0, max=1)
+                losses[cur_idx:cur_idx+len(b_x), ii] = clf_loss_func(clf(b_x_aug), b_y).flatten().cpu().detach().numpy()
+
+            elif aug_type == 'crop':
+                # pad
+                dim = b_x.shape[-1]
+                padding = tuple([int(aug_param)] * 4)
+                b_x_aug = F.pad(b_x, padding)
+                
+                # random crop coordinates (left top of the crop)
+                i = torch.randint(0, int(aug_param)*2 + 1, size=(1, )).item()
+                j = torch.randint(0, int(aug_param)*2 + 1, size=(1, )).item()
+
+                # crop the batch images
+                b_x_aug = b_x_aug[:, :, i:(i+dim), j:(j+dim)]
+                losses[cur_idx:cur_idx+len(b_x), ii] = clf_loss_func(clf(b_x_aug), b_y).flatten().cpu().detach().numpy()
+
+            elif aug_type == 'cutout':
+                cutout = af.Cutout(n_holes=1, length=int(aug_param), device=device)
+                b_x_aug = cutout(b_x.detach().clone().to(device))
+                losses[cur_idx:cur_idx+len(b_x), ii] = clf_loss_func(clf(b_x_aug), b_y).flatten().cpu().detach().numpy()
+
+
+            elif aug_type == 'mixup':
+                if len(mixing_data) < len(b_x):
+                    indices = np.random.choice(len(mixing_data), size=len(b_x), replace=True)
+                else:
+                    indices = np.random.choice(len(mixing_data), size=len(b_x), replace=False)
+
+                b_x_aug = b_x.detach().clone().to(device)
+
+                lam = np.random.beta(aug_param, aug_param) if aug_param > 0 else 1 # mixing param
+
+                b_x_aug = (lam * b_x_aug) + ((1 - lam) * mixing_data[indices])   # mix the input data 
+
+                b_y_aug = (torch.zeros(len(b_x), clf.num_classes, dtype=torch.float).to(device)).scatter_(1, b_y.view(-1, 1), 1) # one hot
+                b_y_aug = (lam * b_y_aug) + ( (1 - lam) * mixing_labels[indices])   # mix the labels
+
+                losses[cur_idx:cur_idx+len(b_x), ii] = clf_loss_func(clf(b_x_aug), b_y_aug).flatten().cpu().detach().numpy()
+
+        cur_idx += len(b_x)      
+    
+    losses = losses[:, 0] if num_repeat == 1 else losses
+    return losses
+
 
 def get_clf_preds(clf, loader, logits=True, temperature=1, device='cpu'):
 

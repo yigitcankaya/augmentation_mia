@@ -3,218 +3,150 @@ import models as m
 import aux_funcs as af
 import os
 import time
+import pickle
 
 from itertools import combinations
 
 import warnings
 warnings.filterwarnings("ignore")
 
-def drop(orig, aug):
-    return f'{((orig-aug)/orig)*100:.2f}%'
 
-
-
-def collect_rad(training_length='regular', capacity=1, print_results=True, aug_types=None, rad_settings=[], ds_name='cifar10', num_attacker_train=100, rank_by_acc_proximity=[], models_path=None):
-    aug_types = ['dp', 'distillation', 'smooth', 'disturblabel', 'crop', 'cutout', 'noise', 'mixup'] if aug_types is None else aug_types
-    models_path = f'{ds_name}_models' if models_path is None else models_path
-
-    params = {}
-    params['aug_types'] = aug_types
-    params['models_path'] = models_path
-
-
-    seeds = af.get_random_seeds()
-    all_models = [af.collect_all_models_and_results(models_path, num_attacker_train, False, seed) for seed in seeds]
-    all_models = [sorted(models, key=lambda entry: entry['model_path']) for models in all_models]
-
-    accs = []
-    bests = []
-    avgs = []
-    for models in zip(*all_models):
-        acc = np.mean([model['test_top1'] for model in models]) 
-        avg = np.mean([model['avg_yeom_adv'] for model in models]) 
-        best = np.mean([model['best_yeom_adv'] for model in models]) 
-        if models[0]['laug'] == 'no' and models[0]['daug'] == 'no' and models[0]['dp_norm_clip'] == 0 and models[0]['capacity'] == 1 and models[0]['training_length'] == 'regular':
-            baseline_acc = acc
-            baseline_avg = avg
-            baseline_best = best
-        
-        accs.append(acc)
-        bests.append(best)
-        avgs.append(avg)
-
-
-    params['baseline_acc'] = baseline_acc
-    params['baseline_avg'] = baseline_avg
-    params['baseline_best'] = baseline_best
-
-    adv_ranks = np.argsort(np.asarray([max(avg, best) for avg, best in zip(avgs, bests)]))
-    acc_ranks = np.argsort(-np.asarray(accs))
-
-    print(f'Baseline acc: {baseline_acc:.2f} - Baseline Best: {baseline_best:.2f} - Baseline Avg: {baseline_avg:.2f}')
-
-    for aug_type in aug_types:
-        params[aug_type] = {}
-        params[aug_type]['max_acc'] = {}
-
-        for acc_rank in acc_ranks:
-            models = [all_models[idx][acc_rank] for idx in range(len(all_models))]
-
-            if not (models[0]['capacity'] == capacity and models[0]['training_length'] == training_length):
-                continue                    
-
-            acc = np.mean([model['test_top1'] for model in models]) 
-            avg_adv = np.mean([model['avg_yeom_adv'] for model in models]) 
-            best_adv = np.mean([model['best_yeom_adv'] for model in models]) 
-            epsilon = models[0]['epsilon']
-            
-            if models[0]['aug'] == aug_type:  
-                param = models[0]['aug_param']
-                params[aug_type]['max_acc']['acc'] = acc
-                params[aug_type]['max_acc']['avg'] = avg_adv
-                params[aug_type]['max_acc']['best'] = best_adv
-                params[aug_type]['max_acc']['param'] = param
-                params[aug_type]['max_acc']['path'] = models[0]['model_path']
-
-                if print_results:
-                    print(f'{ds_name} -- max acc -- Acc: {acc:.2f} -- Acc Drop: {drop(baseline_acc, acc)} - Aug {aug_type}-{param}-{epsilon:.2f} Avg: {avg_adv:.2f} -- Best: {best_adv:.2f} ')
-                break
-        
-        for prox in rank_by_acc_proximity:
-            prox_acc = baseline_acc * (1 - prox)
-            prox_ranks = np.argsort(np.abs(np.asarray(accs) - prox_acc))
-            params[aug_type][f'prox_{prox}'] = {}
-
-            for prox_rank in prox_ranks:
-                models = [all_models[idx][prox_rank] for idx in range(len(all_models))]
-
-                if not (models[0]['capacity'] == capacity and models[0]['training_length'] == training_length):
-                    continue                    
-
-                acc = np.mean([model['test_top1'] for model in models]) 
-                avg_adv = np.mean([model['avg_yeom_adv'] for model in models]) 
-                best_adv = np.mean([model['best_yeom_adv'] for model in models]) 
-                epsilon = models[0]['epsilon']
-                
-                if models[0]['aug'] == aug_type:  
-                    param = models[0]['aug_param']
-                    params[aug_type][f'prox_{prox}']['acc'] = acc
-                    params[aug_type][f'prox_{prox}']['avg'] = avg_adv
-                    params[aug_type][f'prox_{prox}']['best'] = best_adv
-                    params[aug_type][f'prox_{prox}']['param'] = param
-                    params[aug_type][f'prox_{prox}']['path'] = models[0]['model_path']
-
-                    if print_results:
-                        print(f'{ds_name} -- prox {prox} -- Acc: {acc:.2f} -- Acc Drop: {drop(baseline_acc, acc)} - Aug {aug_type}-{param}-{epsilon:.2f} Avg: {avg_adv:.2f} -- Best: {best_adv:.2f} ')
-                    break
-
-        for rad_setting in rad_settings:
-            params[aug_type][f'rad_{rad_setting}'] = {}
-            for adv_rank in adv_ranks:
-                models = [all_models[idx][adv_rank] for idx in range(len(all_models))]
-
-                if not (models[0]['capacity'] == capacity and models[0]['training_length'] == training_length):
-                    continue                    
-
-                acc = np.mean([model['test_top1'] for model in models]) 
-                avg_adv = np.mean([model['avg_yeom_adv'] for model in models]) 
-                best_adv = np.mean([model['best_yeom_adv'] for model in models]) 
-                epsilon = models[0]['epsilon']
-                
-                if models[0]['aug'] == aug_type and acc > (1 - rad_setting)*baseline_acc: 
-                    param = models[0]['aug_param']
-                    params[aug_type][f'rad_{rad_setting}']['acc'] = acc
-                    params[aug_type][f'rad_{rad_setting}']['avg'] = avg_adv
-                    params[aug_type][f'rad_{rad_setting}']['best'] = best_adv
-                    params[aug_type][f'rad_{rad_setting}']['param'] = param
-                    params[aug_type][f'rad_{rad_setting}']['path'] = models[0]['model_path']
-
-                    if print_results:
-                        print(f'{ds_name} -- rad {rad_setting} -- Acc: {acc:.2f} -- Acc Drop: {drop(baseline_acc, acc)} - Aug {aug_type}-{param}-{epsilon:.2f} Avg: {avg_adv:.2f} -- Best: {best_adv:.2f} ')
-                    break
+def get_models_dirs(models_path, ds_name, laug_type, laug_param, daug_type, daug_param, num_epochs, dp_params=None):
+    all_model_params = af.collect_all_models(os.path.join(models_path, ds_name))
     
-    return  params
+    dirs = []
+
+    for params in all_model_params:
+
+        if dp_params is not None and \
+            params['laug_type'] == 'no' and params['daug_type'] == 'no' and \
+            params['dp'] and params['dp_norm_clip'] == dp_params[0] and params['dp_noise'] == dp_params[1]:
+
+            dir = params['dir']
+            dirs.append(dir)
+
+        elif dp_params is None and \
+            params['laug_type'] == laug_type and params['laug_param'] == laug_param and \
+            params['daug_type'] == daug_type and params['daug_param'] == daug_param and \
+            not params['dp'] and params['num_epochs'] == num_epochs:
+
+            dir = params['dir']
+            dirs.append(dir)
+
+    return dirs
+
+def get_non_aug_stats(models_path, ds_name, n_attacker_train, num_epochs):
+    all_model_params = af.collect_all_models(os.path.join(models_path, ds_name))
+    result_files = []
+
+    for params in all_model_params:
+        if params['laug_type'] == 'no' and params['daug_type'] == 'no' and params['dp_norm_clip'] == 0 and params['num_epochs'] == num_epochs:
+            dir = params['dir']
+
+            for fn in os.listdir(dir):
+                if  f'mi_results_ntrain_{n_attacker_train}' in fn:
+                    result_files.append(os.path.join(dir, fn))
+
+    
+    accs = []
+    avg_mias = []
+    pow_mias = []
+
+    for fn in result_files:
+        with open(fn, 'rb') as handle:
+            results = pickle.load(handle)
+
+        accs.append(results['test_top1'])
+        avg_mias.append(results['avg_yeom_adv'])
+        pow_mias.append(results['best_yeom_adv'])
+
+    return {'acc':np.mean(accs), 'avg_mia':np.mean(avg_mias), 'pow_mia':np.mean(pow_mias)}
 
 
+def get_mia_stats(models_path, ds_name, laug_type, daug_type, n_attacker_train, n_repeat, num_epochs, collect_dp=False, sort_order='mia'):
+    all_model_params = af.collect_all_models(os.path.join(models_path, ds_name))
+    
+    dirs = []
 
-def collect_all(training_length='regular', capacity=1, laug_type='smooth', daug_type='crop', ds_name='cifar100', num_attacker_train=100, models_path=None):
+    for params in all_model_params:
 
-    params = {}
+        if collect_dp and params['dp'] and params['laug_type'] == laug_type and params['daug_type'] == daug_type and params['num_epochs'] == num_epochs:
+            dir = params['dir']
+            dirs.append(dir)
 
-    params['daug_type'] = daug_type
-    params['laug_type'] = laug_type
+        elif not collect_dp and params['laug_type'] == laug_type and params['daug_type'] == daug_type and not params['dp'] and params['num_epochs'] == num_epochs:
+            dir = params['dir']
+            dirs.append(dir)
 
-    params['daug_params'] = []
+    dir_prefixes = set([''.join(d.split('_')[:-1]) for d in dirs])
+    
+    # each dir group contains the models trained with same parameters (different runs)
+    dir_groups = [[d for d in dirs if ''.join(d.split('_')[:-1])==pf] for pf in dir_prefixes]
+    all_results = []
 
-    models_path = f'{ds_name}_models' if models_path is None else models_path
+    for dir_group in dir_groups:
+        
+        cur_results = {}
 
-    params['models_path'] = models_path
+        params = af.parse_model_path(os.path.basename(dir_group[0]))
 
-    seeds = af.get_random_seeds()
-    all_models = [af.collect_all_models_and_results(models_path, num_attacker_train, False, seed) for seed in seeds]
-    all_models = [sorted(models, key=lambda entry: entry['model_path']) for models in all_models]
+        result_files = []
+        aware_result_files = []
 
-    for model_idx in range(len(all_models[0])):
-        models = [all_models[idx][model_idx] for idx in range(len(all_models))]
+        for dir in dir_group:
+            for fn in os.listdir(dir):
+                if  f'mi_results_ntrain_{n_attacker_train}' in fn and 'aware' not in fn:
+                    result_files.append(os.path.join(dir, fn))
+                
+                elif f'aware_mi_results_ntrain_{n_attacker_train}_numrepeat_{n_repeat}' in fn:
+                    aware_result_files.append(os.path.join(dir, fn))
 
-        if not (models[0]['capacity'] == capacity and models[0]['training_length'] == training_length):
-            continue                    
+                elif f'aware_mi_results_ntrain_{n_attacker_train}_numrepeat_1' in fn:
+                    aware_result_files.append(os.path.join(dir, fn))
 
-        acc = np.mean([model['test_top1'] for model in models]) 
-        avg_adv = np.mean([model['avg_yeom_adv'] for model in models]) 
-        best_adv = np.mean([model['best_yeom_adv'] for model in models]) 
+        accs = []
+        avg_mias = []
+        pow_mias = []
+        for fn in result_files:
+            with open(fn, 'rb') as handle:
+                results = pickle.load(handle)
+            
+            accs.append(results['test_top1'])
+            avg_mias.append(results['avg_yeom_adv'])
+            pow_mias.append(results['best_yeom_adv'])
+
+        aware_mias = []
+
+        for fn in aware_result_files:
+            with open(fn, 'rb') as handle:
+                results = pickle.load(handle)
+
+            aware_mias.append(results['adv'])
+
+        cur_results['laug_type'], cur_results['daug_type'] = laug_type, daug_type
+        cur_results['laug_param'], cur_results['daug_param'] = params['laug_param'], params['daug_param']
+        cur_results['acc'], cur_results['avg_mia'], cur_results['pow_mia'] = np.mean(accs), np.mean(avg_mias), np.mean(pow_mias)
+
+        if len(aware_mias) > 0:
+            cur_results['awa_mia'] = np.mean(aware_mias),  
+        else:
+            cur_results['awa_mia'] = cur_results['pow_mia']  
+
+        if collect_dp:
+            print(dir_group[0])
+            epsilon = af.load_model(os.path.join(dir_group[0], 'clf')).dp_epsilons[-1]
+            cur_results['epsilon'] = epsilon
+            cur_results['dp_noise'] = params['dp_noise']
+            cur_results['dp_norm_clip'] = params['dp_norm_clip']
 
 
-        if models[0]['laug'] == laug_type and models[0]['daug'] == daug_type:
-            laug_param, daug_param = models[0]['laug_param'], models[0]['daug_param']
+        all_results.append(cur_results)
+    
+    if sort_order == 'mia':
+        # get the maximum successful attack accuracy and sort it based on that
+        all_results = sorted(all_results, key=lambda x: max(x['avg_mia'], x['pow_mia'], x.get('awa_mia', 'pow_mia')))
+    else:
+        # sort the results based on the model accuracy
+        all_results = sorted(all_results, key=lambda x: -x['acc'])
 
-            if daug_param not in params:
-                params[daug_param] = {}
-                params[daug_param]['acc'] = []
-                params[daug_param]['best'] = []
-                params[daug_param]['laug_param'] = []
-                params[daug_param]['avg'] = []
-                params['daug_params'].append(daug_param)
-                params[daug_param]['path'] = []
-
-            params[daug_param]['acc'].append(acc)
-            params[daug_param]['avg'].append(avg_adv)
-            params[daug_param]['best'].append(best_adv)
-            params[daug_param]['laug_param'].append(laug_param)
-            params[daug_param]['path'].append(models[0]['model_path'])
-
-    return  params
-
-
-def collect_dp(training_length='regular', capacity=1, ds_name='cifar100', num_attacker_train=100):
-
-    params = {}
-
-    models_path = f'{ds_name}_models'
-
-    seeds = af.get_random_seeds()
-    all_models = [af.collect_all_models_and_results(models_path, num_attacker_train, False, seed) for seed in seeds]
-    all_models = [sorted(models, key=lambda entry: entry['model_path']) for models in all_models]
-
-    for model_idx in range(len(all_models[0])):
-        models = [all_models[idx][model_idx] for idx in range(len(all_models))]
-
-        if not (models[0]['capacity'] == capacity and models[0]['training_length'] == training_length):
-            continue                    
-
-        acc = np.mean([model['test_top1'] for model in models]) 
-        avg_adv = np.mean([model['avg_yeom_adv'] for model in models]) 
-        best_adv = np.mean([model['best_yeom_adv'] for model in models]) 
-
-        dp_noise = models[0]['dp_noise']
-
-        if models[0]['laug'] == 'no' and models[0]['daug'] == 'no' and dp_noise != 0:
-            if dp_noise not in params:
-                params[dp_noise] = {}
-
-            params[dp_noise]['acc'] = acc
-            params[dp_noise]['best'] = avg_adv
-            params[dp_noise]['avg'] = best_adv
-            params[dp_noise]['path'] = models[0]['model_path']
-
-    return  params
+    return all_results
