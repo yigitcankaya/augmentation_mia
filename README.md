@@ -7,10 +7,9 @@
 **Requirements:**
  * [CUDA 11.0](https://developer.nvidia.com/cuda-11.0-update1-download-archive)
 * [CUDNN 8.0](https://developer.nvidia.com/cudnn)
-* PyTorch and TorchVision ("pip install torch\==1.7.1+cu110 torchvision\==0.8.2+cu110 torchaudio\==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html)
- * Opacus 0.9 - Differential privacy package for pytorch  (pip install opacus\==0.9.0)
+* PyTorch and TorchVision (pip install torch\==1.7.1+cu110 torchvision\==0.8.2+cu110 torchaudio\==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html)
+ * Opacus 0.9 - Differential privacy package for PyTorch  (pip install opacus\==0.9.0)
 * tqdm (pip install tqdm)
-* sns (pip install seaborn)
 
 **Source code files and their contents:**
 * train_models.py --- contains the wrappers to train all the models with and without augmentation, takes the path to a config file as the command line argument.
