@@ -23,5 +23,11 @@
         "batch_size": 64,
         "accumulation_steps": 4
     },
-    "train_crop_smooth": true
+    "train_crop_smooth": true,
+    "attack": {
+        "n_attacker_train": 100,
+        "n_attacker_test": 5000,
+        "sampling_random_seeds": [0,1,2,3,4],
+        "n_aware_repeat": 20
+    }
 }

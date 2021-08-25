@@ -279,7 +279,7 @@ if __name__ == "__main__":
 
     n_attacker_train = cfg['attack']['n_attacker_train']
     n_attacker_test = cfg['attack']['n_attacker_test']
-    seeds = cfg['attack']['random_seeds']
+    seeds = cfg['attack']['sampling_random_seeds']
     n_repeat = cfg['attack']['n_aware_repeat']
     ds_names = cfg['training_datasets']
     models_path = cfg['models_path']
@@ -298,7 +298,7 @@ if __name__ == "__main__":
         # load the datasets
         datasets = af.get_ds(ds_name, device)
 
-        for seed in af.get_random_seeds():
+        for seed in seeds:
             # N instances from train set and N from test set
             mi_loaders, idx = take_subset_from_datasets(datasets, seed, n_attacker_train, n_attacker_test, device=device)
             for params in all_model_params:
